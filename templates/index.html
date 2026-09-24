@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FAST AI & Automation Effort Tracker</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand-mark">
+          <div class="brand-glyph">F</div>
+          <div>
+            <h1>FASTFlow</h1>
+            <p>AI effort studio</p>
+          </div>
+        </div>
+        <nav class="section-tabs" aria-label="Main sections">
+          <button class="active" data-section-target="dashboard"><span class="nav-icon">01</span>Dashboard</button>
+          <button data-section-target="explorer"><span class="nav-icon">02</span>Process Explorer</button>
+          <button data-section-target="usecases"><span class="nav-icon">03</span>Use Cases</button>
+          <button data-section-target="setup"><span class="nav-icon">04</span>Setup</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span>Small data. Sharp signal.</span>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <label class="search-shell" for="global-search">
+            <span>Search</span>
+            <input id="global-search" type="search" placeholder="Search use cases">
+          </label>
+          <div class="topbar-actions">
+            <div class="profile-chip">
+              <span class="profile-avatar">FS</span>
+              <div>
+                <strong>FAST</strong>
+                <small>Application Services</small>
+              </div>
+            </div>
+          </div>
+        </header>
+
+    <main class="app-shell">
+      <section class="filter-panel">
+        <div class="filter-grid">
+          <label>Pillar<select id="filter-pillar" class="form-select form-select-sm"></select></label>
+          <label>Process<select id="filter-process" class="form-select form-select-sm"></select></label>
+          <label>Sub-process<select id="filter-subprocess" class="form-select form-select-sm"></select></label>
+          <label>Type<select id="filter-type" class="form-select form-select-sm"></select></label>
+          <label>Status<select id="filter-status" class="form-select form-select-sm"></select></label>
+          <label>Contributor<select id="filter-contributor" class="form-select form-select-sm"></select></label>
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-sm btn-outline-secondary" id="reset-filters">Reset</button>
+          <a class="btn btn-sm btn-primary" id="export-link" href="/export">Download Excel</a>
+        </div>
+      </section>
+
+      <section id="dashboard" class="app-section active">
+        <div class="page-heading">
+          <div>
+            <h2>Dashboard</h2>
+            <p>Plan, prioritize, and track AI and automation use cases with crisp portfolio signal.</p>
+          </div>
+          <button class="btn btn-sm btn-primary" id="add-usecase-dashboard" type="button">+ Add Use Case</button>
+        </div>
+        <div class="metric-grid" id="metric-grid"></div>
+        <div class="content-grid dashboard-main">
+          <article class="panel large">
+            <div class="panel-heading">
+              <h2>Effort Concentration</h2>
+              <span>Actual use cases by attached item</span>
+            </div>
+            <div id="ranked-list" class="concentration-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="explorer" class="app-section">
+        <div class="section-toolbar">
+          <div>
+            <h2>Process Explorer</h2>
+            <p>Browse the hierarchy you upload and attach use cases at process, sub-process, or task level.</p>
+          </div>
+          <div class="button-row">
+            <div class="view-toggle" aria-label="Explorer view">
+              <button class="btn btn-sm btn-primary" data-explorer-view="board">Board</button>
+              <button class="btn btn-sm btn-outline-secondary" data-explorer-view="tree">Tree</button>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" data-expand-all>Expand All</button>
+            <button class="btn btn-sm btn-outline-secondary" data-collapse-all>Collapse All</button>
+            <button class="btn btn-sm btn-primary" id="add-usecase-from-explorer">Add Use Case</button>
+          </div>
+        </div>
+        <div class="explorer-layout">
+          <article class="panel">
+            <div class="category-legend" aria-label="Hierarchy legend">
+              <span><i class="legend-dot legend-process"></i>Process</span>
+              <span><i class="legend-dot legend-subprocess"></i>Sub-process</span>
+              <span><i class="legend-dot legend-task"></i>Task</span>
+            </div>
+            <div id="process-tree" class="hierarchy"></div>
+            <div id="process-board" class="process-board"></div>
+          </article>
+          <article class="panel detail-panel" id="detail-panel" hidden>
+            <div class="panel-heading">
+              <h2 id="selected-node-title">Select a hierarchy item</h2>
+              <span id="selected-node-meta">Pillars and status counts appear here</span>
+            </div>
+            <p id="selected-node-description" class="muted"></p>
+            <div id="selected-node-cases" class="case-stack"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="usecases" class="app-section">
+        <div class="section-toolbar">
+          <div>
+            <h2>Use Case Register</h2>
+            <p>Central table of AI, automation, and agentic AI opportunities.</p>
+          </div>
+          <button class="btn btn-sm btn-primary" id="add-usecase">Add Use Case</button>
+        </div>
+        <article class="panel table-panel">
+          <div class="registry-summary">
+            <strong id="registry-count">0 use cases</strong>
+            <span id="registry-filter-note">No table filters applied</span>
+            <button class="btn btn-sm btn-outline-secondary" id="reset-registry-filters" type="button">Clear Table Filters</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table align-middle" id="usecase-table">
+              <thead>
+                <tr>
+                  <th>Pillar</th>
+                  <th>Process</th>
+                  <th>Sub-process</th>
+                  <th>Task</th>
+                  <th>Use Case Title</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Short Description</th>
+                  <th>Monthly Cost</th>
+                  <th>Monthly Savings</th>
+                  <th>Contributor</th>
+                  <th>Created</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+                <tr class="table-filter-row">
+                  <th><input class="table-filter" data-table-filter="pillar" placeholder="Filter"></th>
+                  <th><select class="table-filter" data-table-filter="process"></select></th>
+                  <th><select class="table-filter" data-table-filter="subprocess"></select></th>
+                  <th><select class="table-filter" data-table-filter="task"></select></th>
+                  <th><input class="table-filter" data-table-filter="title" placeholder="Filter"></th>
+                  <th><select class="table-filter" data-table-filter="use_case_type"></select></th>
+                  <th><select class="table-filter" data-table-filter="status"></select></th>
+                  <th><input class="table-filter" data-table-filter="short_description" placeholder="Filter"></th>
+                  <th><select class="table-filter" data-table-filter="sort_cost"></select></th>
+                  <th><select class="table-filter" data-table-filter="sort_savings"></select></th>
+                  <th><input class="table-filter" data-table-filter="contributor" placeholder="Filter"></th>
+                  <th><input class="table-filter" data-table-filter="created_date" placeholder="YYYY-MM-DD"></th>
+                  <th><input class="table-filter" data-table-filter="updated_date" placeholder="YYYY-MM-DD"></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="setup" class="app-section">
+        <div class="section-toolbar">
+          <div>
+            <h2>Setup</h2>
+            <p>Upload your Excel hierarchy and maintain process hierarchy items and pillar labels.</p>
+          </div>
+          <div class="button-row">
+            <form id="hierarchy-import-form" class="import-form">
+              <input id="hierarchy-file" name="file" type="file" accept=".xlsx,.xlsm,.csv" class="visually-hidden">
+              <label class="btn btn-sm btn-outline-primary" for="hierarchy-file">Upload Excel</label>
+              <label class="replace-toggle"><input type="checkbox" name="replace" checked> Replace current setup</label>
+            </form>
+            <button class="btn btn-sm btn-outline-primary" id="add-node">Add Hierarchy Item</button>
+            <button class="btn btn-sm btn-primary" id="add-pillar">Add Pillar</button>
+          </div>
+        </div>
+        <div class="setup-grid">
+          <article class="panel table-panel">
+            <div class="panel-heading">
+              <h2>Process Hierarchy</h2>
+              <span>Process, sub-process, and task nodes</span>
+            </div>
+            <div id="setup-nodes" class="setup-list"></div>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading">
+              <h2>Pillar Labels</h2>
+              <span>Classification and filtering labels</span>
+            </div>
+            <div id="setup-pillars" class="setup-list"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+      </div>
+    </div>
+
+    <div class="modal fade" id="useCaseModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form class="modal-content" id="usecase-form">
+          <div class="modal-header">
+            <h3 class="modal-title">Use Case</h3>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body form-grid">
+            <input type="hidden" name="id">
+            <input type="hidden" name="node_id">
+            <label class="wide">Use Case Title<input required name="title" class="form-control"></label>
+            <label>Process<select required name="process_id" class="form-select"></select></label>
+            <label>Sub-process<select name="subprocess_id" class="form-select"></select></label>
+            <label>Task<select name="task_id" class="form-select"></select></label>
+            <label>Type<select required name="use_case_type" class="form-select"></select></label>
+            <label>Status<select required name="status" class="form-select"></select></label>
+            <label>Contributor<input required name="contributor" class="form-control"></label>
+            <label>Created Date<input required name="created_date" type="date" class="form-control"></label>
+            <label>Last Updated Date<input required name="updated_date" type="date" class="form-control"></label>
+            <label>Effort Hours / Run<input name="effort_hours" type="number" min="0" step="0.25" class="form-control"></label>
+            <label>Cost / Run<input name="cost_per_run" type="number" min="0" step="0.01" class="form-control"></label>
+            <label>Frequency / Month<input name="frequency_per_month" type="number" min="0" step="1" class="form-control"></label>
+            <label>Savings %<input name="savings_percent" type="number" min="0" max="100" step="1" class="form-control"></label>
+            <label class="wide">Current Problem / Opportunity<textarea required name="problem_statement" class="form-control" rows="3"></textarea></label>
+            <label class="wide">Short Description<textarea required name="short_description" class="form-control" rows="3"></textarea></label>
+            <div class="wide estimate-preview" id="estimate-preview"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-danger me-auto" id="delete-usecase">Delete</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal fade" id="nodeModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="node-form">
+          <div class="modal-header">
+            <h3 class="modal-title">Hierarchy Item</h3>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body form-grid single">
+            <input type="hidden" name="id">
+            <label>Name<input required name="name" class="form-control"></label>
+            <label>Type<select required name="type" class="form-select"></select></label>
+            <label>Parent<select name="parent_id" class="form-select"></select></label>
+            <label>Pillars<select name="pillar_ids" class="form-select" multiple size="4"></select></label>
+            <label>Description<textarea name="description" class="form-control" rows="3"></textarea></label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-danger me-auto" id="delete-node">Delete</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal fade" id="pillarModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="pillar-form">
+          <div class="modal-header">
+            <h3 class="modal-title">Pillar Label</h3>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body form-grid single">
+            <input type="hidden" name="id">
+            <label>Name<input required name="name" class="form-control"></label>
+            <label>Description<textarea name="description" class="form-control" rows="3"></textarea></label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-danger me-auto" id="delete-pillar">Delete</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
+  </body>
+</html>

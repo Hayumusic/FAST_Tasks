@@ -4,6 +4,7 @@ const state = {
   useCases: [],
   hierarchy: [],
   filters: {},
+  registryFilters: {},
   selectedNodeId: null,
   explorerView: "board",
   expandedNodes: new Set(),
@@ -69,6 +70,7 @@ function renderAll() {
   renderHierarchy(qs("#process-tree"), state.hierarchy, { selectable: true });
   renderProcessBoard();
   renderSelectedNode();
+  populateRegistryFilters();
   renderUseCaseTable();
   renderSetup();
   fillFormSelects();
@@ -79,7 +81,8 @@ function renderMetrics() {
     "Total Use Cases": state.useCases.length,
     Planned: countBy("status", "Planned"),
     WIP: countBy("status", "WIP"),
-    Built: state.useCases.filter((uc) => uc.status === "Built" || uc.status === "Built and Deployed").length,
+    Built: countBy("status", "Built"),
+    "Built & Deployed": countBy("status", "Built and Deployed"),
     Automation: countBy("use_case_type", "Automation"),
     AI: countBy("use_case_type", "AI"),
     "Agentic AI": countBy("use_case_type", "Agentic AI"),
@@ -161,7 +164,6 @@ function renderNode(node, options) {
   const selected = Number(state.selectedNodeId) === Number(node.id) ? " selected" : "";
   const expanded = options.compact || state.expandedNodes.has(Number(node.id));
   const button = node.children?.length ? `<button class="caret" data-node-toggle="${node.id}" aria-label="${expanded ? "Collapse" : "Expand"}">${expanded ? "-" : "+"}</button>` : `<span class="caret"></span>`;
-  const cases = directUseCases(node.id);
   return `
     <div class="node-block">
       <div class="node-row node-${node.type}${selected}" data-node-id="${node.id}">
@@ -175,7 +177,6 @@ function renderNode(node, options) {
           <button class="node-add" data-add-usecase-node="${node.id}" aria-label="Add use case to ${node.name}">Add</button>
         </div>
       </div>
-      ${useCaseGroup(cases)}
       <div class="node-children${expanded ? "" : " collapsed"}">${(node.children || []).map((child) => renderNode(child, options)).join("")}</div>
     </div>
   `;
@@ -193,7 +194,6 @@ function renderProcessBoard() {
         <span class="board-add" data-add-usecase-node="${process.id}" aria-label="Add use case to ${process.name}">Add</span>
       </button>
       <div class="subprocess-stack${state.collapsedBoardNodes.has(Number(process.id)) ? " collapsed" : ""}">
-        ${useCaseGroup(directUseCases(process.id), "Attached to this process")}
         ${(process.children || []).map((subprocess) => `
           <div class="subprocess-card${state.collapsedBoardNodes.has(Number(subprocess.id)) ? " collapsed" : ""}">
             <button class="board-subprocess node-subprocess${Number(state.selectedNodeId) === Number(subprocess.id) ? " selected" : ""}" data-node-id="${subprocess.id}">
@@ -203,7 +203,6 @@ function renderProcessBoard() {
               <span class="board-add" data-add-usecase-node="${subprocess.id}" aria-label="Add use case to ${subprocess.name}">Add</span>
             </button>
             <div class="task-stack${state.collapsedBoardNodes.has(Number(subprocess.id)) ? " collapsed" : ""}">
-              ${useCaseGroup(directUseCases(subprocess.id), "Attached to this sub-process")}
               ${(subprocess.children || []).map((task) => `
                 <div class="task-branch">
                   <button class="task-chip node-task${Number(state.selectedNodeId) === Number(task.id) ? " selected" : ""}" data-node-id="${task.id}">
@@ -211,7 +210,6 @@ function renderProcessBoard() {
                     <strong>${task.counts?.total || 0}</strong>
                     <i class="board-add" data-add-usecase-node="${task.id}" aria-label="Add use case to ${task.name}">Add</i>
                   </button>
-                  ${useCaseGroup(directUseCases(task.id), "Attached to this task")}
                 </div>
               `).join("") || empty("No tasks uploaded")}
             </div>
@@ -222,6 +220,8 @@ function renderProcessBoard() {
   `).join("") || empty("Upload a hierarchy to build the board");
   qsa("[data-explorer-view]").forEach((button) => {
     const active = button.dataset.explorerView === state.explorerView;
+    button.dataset.active = active ? "true" : "false";
+    button.setAttribute("aria-pressed", active ? "true" : "false");
     button.classList.toggle("btn-primary", active);
     button.classList.toggle("btn-outline-secondary", !active);
   });
@@ -273,18 +273,33 @@ function boardToggle(node) {
 
 function renderSelectedNode() {
   const node = state.nodes.find((item) => Number(item.id) === Number(state.selectedNodeId));
+  const hierarchyNode = findHierarchyNode(state.selectedNodeId);
+  const panel = qs("#detail-panel");
+  qs(".explorer-layout").classList.toggle("detail-open", Boolean(node));
   if (!node) {
+    panel.hidden = true;
     qs("#selected-node-title").textContent = "Select a hierarchy item";
     qs("#selected-node-meta").textContent = "Pillars and status counts appear here";
     qs("#selected-node-description").textContent = "";
-    qs("#selected-node-cases").innerHTML = empty("Choose a process, sub-process, or task to see directly attached use cases");
+    qs("#selected-node-cases").innerHTML = "";
     return;
   }
+  panel.hidden = false;
   qs("#selected-node-title").textContent = node.name;
-  qs("#selected-node-meta").textContent = `${titleCase(node.type)} · ${node.pillars || "No pillars"}`;
+  const total = hierarchyNode?.counts?.total || 0;
+  qs("#selected-node-meta").textContent = `${titleCase(node.type)} · ${total} use case${total === 1 ? "" : "s"} · ${node.pillars || "No pillars"}`;
   qs("#selected-node-description").textContent = node.description || "No description provided.";
   const cases = state.useCases.filter((uc) => Number(uc.node_id) === Number(node.id));
   qs("#selected-node-cases").innerHTML = cases.map((uc) => useCaseCard(uc)).join("") || empty("No use cases attached directly to this item");
+}
+
+function findHierarchyNode(nodeId, nodes = state.hierarchy) {
+  for (const node of nodes) {
+    if (Number(node.id) === Number(nodeId)) return node;
+    const match = findHierarchyNode(nodeId, node.children || []);
+    if (match) return match;
+  }
+  return null;
 }
 
 function useCaseCard(uc) {
@@ -300,7 +315,12 @@ function useCaseCard(uc) {
 }
 
 function renderUseCaseTable() {
-  qs("#usecase-table tbody").innerHTML = state.useCases.map((uc) => `
+  const rows = filteredRegistryUseCases();
+  const appliedCount = Object.values(state.registryFilters).filter(Boolean).length;
+  const total = state.useCases.length;
+  qs("#registry-count").textContent = `${rows.length} of ${total} use case${total === 1 ? "" : "s"}`;
+  qs("#registry-filter-note").textContent = appliedCount ? `${appliedCount} table filter${appliedCount === 1 ? "" : "s"} applied` : "No table filters applied";
+  qs("#usecase-table tbody").innerHTML = rows.map((uc) => `
     <tr>
       <td>${pillHtml(uc.pillar)}</td>
       <td>${uc.process || ""}</td>
@@ -318,6 +338,58 @@ function renderUseCaseTable() {
       <td><button class="btn btn-sm btn-outline-secondary edit-usecase" data-id="${uc.id}">Edit</button></td>
     </tr>
   `).join("") || `<tr><td colspan="14">${empty("No use cases match the current filters")}</td></tr>`;
+}
+
+function populateRegistryFilters() {
+  qsa(".table-filter").forEach((control) => {
+    const key = control.dataset.tableFilter;
+    if (control.tagName === "SELECT") {
+      let options = [];
+      let label = "All";
+      if (key === "status") options = STATUSES;
+      else if (key === "use_case_type") options = TYPES;
+      else if (["process", "subprocess", "task"].includes(key)) options = uniqueRegistryValues(key);
+      else if (key === "sort_cost" || key === "sort_savings") {
+        label = "Sort";
+        options = [
+          { value: "asc", label: "Ascending" },
+          { value: "desc", label: "Descending" },
+        ];
+      }
+      control.innerHTML = `<option value="">${label}</option>` + options.map((option) => {
+        const value = typeof option === "string" ? option : option.value;
+        const text = typeof option === "string" ? option : option.label;
+        return `<option value="${value}">${text}</option>`;
+      }).join("");
+    }
+    control.value = state.registryFilters[key] || "";
+  });
+}
+
+function filteredRegistryUseCases() {
+  const filters = Object.fromEntries(Object.entries(state.registryFilters).filter(([key, value]) => value && !key.startsWith("sort_")));
+  const sortKey = state.registryFilters.sort_cost ? "estimated_monthly_cost" : state.registryFilters.sort_savings ? "estimated_monthly_savings" : "";
+  const sortDirection = state.registryFilters.sort_cost || state.registryFilters.sort_savings || "";
+  let rows = state.useCases.filter((uc) => Object.entries(filters).every(([key, raw]) => {
+    const value = String(raw || "").toLowerCase().trim();
+    if (!value) return true;
+    if (["process", "subprocess", "task", "use_case_type", "status"].includes(key)) {
+      return String(uc[key] || "") === String(raw || "");
+    }
+    return String(uc[key] || "").toLowerCase().includes(value);
+  }));
+  if (sortKey) {
+    rows = [...rows].sort((a, b) => {
+      const delta = Number(a[sortKey] || 0) - Number(b[sortKey] || 0);
+      return sortDirection === "desc" ? -delta : delta;
+    });
+  }
+  return rows;
+}
+
+function uniqueRegistryValues(field) {
+  return [...new Set(state.useCases.map((uc) => uc[field]).filter(Boolean))]
+    .sort((a, b) => String(a).localeCompare(String(b)));
 }
 
 function money(value) {
@@ -553,7 +625,7 @@ document.addEventListener("click", async (event) => {
     state.selectedNodeId = target.closest("[data-node-id]").dataset.nodeId;
     renderAll();
   }
-  if (target.matches("#add-usecase")) openUseCase();
+  if (target.matches("#add-usecase, #add-usecase-dashboard")) openUseCase();
   if (target.matches("#add-usecase-from-explorer")) openUseCase(null, state.selectedNodeId);
   if (target.matches(".edit-usecase")) openUseCase(target.dataset.id);
   if (target.matches("#add-node")) openNode();
@@ -566,6 +638,49 @@ document.addEventListener("click", async (event) => {
     qsa(".filter-panel select").forEach((select) => { select.value = ""; });
     await refresh();
   }
+  if (target.matches("#reset-registry-filters")) {
+    state.registryFilters = {};
+    qsa(".table-filter").forEach((control) => { control.value = ""; });
+    qs("#global-search").value = "";
+    renderUseCaseTable();
+  }
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target.matches("#global-search")) {
+    state.registryFilters.title = event.target.value;
+    const titleFilter = qs('[data-table-filter="title"]');
+    if (titleFilter) titleFilter.value = event.target.value;
+    renderUseCaseTable();
+    return;
+  }
+  if (!event.target.matches(".table-filter")) return;
+  state.registryFilters[event.target.dataset.tableFilter] = event.target.value;
+  if (event.target.dataset.tableFilter === "sort_cost") {
+    state.registryFilters.sort_savings = "";
+    qs('[data-table-filter="sort_savings"]').value = "";
+  }
+  if (event.target.dataset.tableFilter === "sort_savings") {
+    state.registryFilters.sort_cost = "";
+    qs('[data-table-filter="sort_cost"]').value = "";
+  }
+  if (event.target.dataset.tableFilter === "title") qs("#global-search").value = event.target.value;
+  renderUseCaseTable();
+});
+
+document.addEventListener("change", (event) => {
+  if (!event.target.matches(".table-filter")) return;
+  state.registryFilters[event.target.dataset.tableFilter] = event.target.value;
+  if (event.target.dataset.tableFilter === "sort_cost") {
+    state.registryFilters.sort_savings = "";
+    qs('[data-table-filter="sort_savings"]').value = "";
+  }
+  if (event.target.dataset.tableFilter === "sort_savings") {
+    state.registryFilters.sort_cost = "";
+    qs('[data-table-filter="sort_cost"]').value = "";
+  }
+  if (event.target.dataset.tableFilter === "title") qs("#global-search").value = event.target.value;
+  renderUseCaseTable();
 });
 
 qsa("#usecase-form input").forEach((input) => {
