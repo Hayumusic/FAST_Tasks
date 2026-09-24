@@ -20,7 +20,7 @@ PORT=8000
 Start command:
 
 ```sh
-gunicorn app:app --bind 0.0.0.0:${PORT:-8000}
+gunicorn wsgi:app --bind 0.0.0.0:${PORT:-8000}
 ```
 
 Health check:
@@ -32,12 +32,19 @@ GET /healthz
 ## Backend deployment checklist
 
 - Install dependencies with `pip install -r requirements.txt`.
+- Run the start command from the repository root, where `app.py`, `wsgi.py`, `static/`, and `templates/` exist.
 - Set `FLASK_DEBUG=false` in hosted environments.
 - Set `PORT` to the platform-provided port, or default to `8000` with Gunicorn.
 - Set `FAST_DB_PATH` to a persistent disk path if using SQLite.
 - Do not commit or deploy `instance/fast_tracker.sqlite3`; the app creates an empty database on first start.
 - Back up the SQLite file via Lightsail snapshots or a scheduled copy from the persistent disk.
 - Use `/healthz` for load balancer or uptime checks.
+
+If starting from another directory, pass the app folder explicitly:
+
+```sh
+gunicorn --chdir /path/to/FAST_Tasks wsgi:app --bind 0.0.0.0:${PORT:-8000}
+```
 
 ## More managed AWS path
 
