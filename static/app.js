@@ -646,6 +646,11 @@ document.addEventListener("click", async (event) => {
     openUseCase(null, nodeId);
     return;
   }
+  if (target.matches("#close-detail-panel")) {
+    state.selectedNodeId = null;
+    renderAll();
+    return;
+  }
   if (target.matches("[data-expand-all]")) {
     expandableNodeIds().forEach((id) => state.expandedNodes.add(id));
     state.collapsedBoardNodes.clear();
