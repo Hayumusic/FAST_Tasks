@@ -25,7 +25,11 @@ STATUSES = {"Planned", "WIP", "Built", "Built and Deployed"}
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-app.secret_key = os.environ.get("FAST_SECRET_KEY", "dev-only-change-me-before-hosting")
+if os.environ.get("FLASK_DEBUG", "true").lower() != "true" and not os.environ.get("FAST_SECRET_KEY"):
+    raise RuntimeError("FAST_SECRET_KEY must be set when FLASK_DEBUG is false")
+app.secret_key = os.environ.get("FAST_SECRET_KEY", "dev-only-local-secret")
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_DEBUG", "true").lower() != "true"
 
 
 @app.after_request
