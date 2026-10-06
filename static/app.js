@@ -9,6 +9,7 @@ const state = {
   explorerView: "board",
   expandedNodes: new Set(),
   collapsedBoardNodes: new Set(),
+  boardCollapseInitialized: false,
 };
 
 const TYPES = ["Automation", "AI", "Agentic AI"];
@@ -32,6 +33,11 @@ async function refresh() {
   const query = new URLSearchParams(cleanFilters()).toString();
   const data = await api(`/api/bootstrap${query ? `?${query}` : ""}`);
   Object.assign(state, data);
+  state.explorerView = "board";
+  if (!state.boardCollapseInitialized) {
+    state.collapsedBoardNodes = new Set(expandableNodeIds());
+    state.boardCollapseInitialized = true;
+  }
   populateFilters();
   renderAll();
 }
@@ -67,7 +73,8 @@ function populateFilters() {
 function renderAll() {
   renderMetrics();
   renderDashboardLists();
-  renderHierarchy(qs("#process-tree"), state.hierarchy, { selectable: true });
+  const tree = qs("#process-tree");
+  if (tree) renderHierarchy(tree, state.hierarchy, { selectable: true });
   renderProcessBoard();
   renderSelectedNode();
   populateRegistryFilters();
@@ -183,12 +190,13 @@ function renderNode(node, options) {
 }
 
 function renderProcessBoard() {
-  qs("#process-tree").style.display = state.explorerView === "tree" ? "grid" : "none";
-  qs("#process-board").style.display = state.explorerView === "board" ? "grid" : "none";
+  if (qs("#process-tree")) qs("#process-tree").style.display = "none";
+  qs("#process-board").style.display = "grid";
   qs("#process-board").innerHTML = state.hierarchy.map((process) => `
     <section class="process-column${state.collapsedBoardNodes.has(Number(process.id)) ? " collapsed" : ""}">
       <button class="board-process node-process${Number(state.selectedNodeId) === Number(process.id) ? " selected" : ""}" data-node-id="${process.id}">
         ${boardToggle(process)}
+        <span class="node-bullet node-bullet-process" aria-hidden="true"></span>
         <strong>${process.name}</strong>
         <span class="board-count">${process.counts?.total || 0}</span>
         <span class="board-add" data-add-usecase-node="${process.id}" aria-label="Add use case to ${process.name}">Add</span>
@@ -198,6 +206,7 @@ function renderProcessBoard() {
           <div class="subprocess-card${state.collapsedBoardNodes.has(Number(subprocess.id)) ? " collapsed" : ""}">
             <button class="board-subprocess node-subprocess${Number(state.selectedNodeId) === Number(subprocess.id) ? " selected" : ""}" data-node-id="${subprocess.id}">
               ${boardToggle(subprocess)}
+              <span class="node-bullet node-bullet-subprocess" aria-hidden="true"></span>
               <strong>${subprocess.name}</strong>
               <span class="board-count">${subprocess.counts?.total || 0}</span>
               <span class="board-add" data-add-usecase-node="${subprocess.id}" aria-label="Add use case to ${subprocess.name}">Add</span>
@@ -206,6 +215,7 @@ function renderProcessBoard() {
               ${(subprocess.children || []).map((task) => `
                 <div class="task-branch">
                   <button class="task-chip node-task${Number(state.selectedNodeId) === Number(task.id) ? " selected" : ""}" data-node-id="${task.id}">
+                    <span class="node-bullet node-bullet-task" aria-hidden="true"></span>
                     <span>${task.name}</span>
                     <strong>${task.counts?.total || 0}</strong>
                     <i class="board-add" data-add-usecase-node="${task.id}" aria-label="Add use case to ${task.name}">Add</i>
@@ -218,13 +228,6 @@ function renderProcessBoard() {
       </div>
     </section>
   `).join("") || empty("Upload a hierarchy to build the board");
-  qsa("[data-explorer-view]").forEach((button) => {
-    const active = button.dataset.explorerView === state.explorerView;
-    button.dataset.active = active ? "true" : "false";
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-    button.classList.toggle("btn-primary", active);
-    button.classList.toggle("btn-outline-secondary", !active);
-  });
 }
 
 function directUseCases(nodeId) {
@@ -502,8 +505,8 @@ function updateEstimatePreview() {
   const monthlyCost = cost * frequency;
   const monthlySavings = monthlyCost * savings / 100;
   qs("#estimate-preview").innerHTML = `
-    <strong>Estimated monthly cost: ${money(monthlyCost)}</strong>
-    <strong>Estimated monthly savings: ${money(monthlySavings)}</strong>
+    <strong>Current monthly cost: ${money(monthlyCost)}</strong>
+    <strong>Monthly savings from automation: ${money(monthlySavings)}</strong>
   `;
 }
 
@@ -573,8 +576,21 @@ function hideModal(selectorOrElement) {
   if (!qs(".modal.show")) document.body.style.overflow = "";
 }
 
+function setActiveSection(sectionId) {
+  qsa("[data-section-target]").forEach((btn) => btn.classList.toggle("active", btn.dataset.sectionTarget === sectionId));
+  qsa(".app-section").forEach((section) => section.classList.toggle("active", section.id === sectionId));
+  document.body.dataset.activeSection = sectionId;
+}
+
 document.addEventListener("click", async (event) => {
   const target = event.target;
+  if (target.matches(".sidebar-toggle")) {
+    const collapsed = document.body.classList.toggle("sidebar-collapsed");
+    target.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    target.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    target.textContent = collapsed ? "›" : "‹";
+    return;
+  }
   if (target.matches("[data-node-toggle]")) {
     event.stopPropagation();
     const id = Number(target.dataset.nodeToggle);
@@ -611,11 +627,9 @@ document.addEventListener("click", async (event) => {
     renderAll();
     return;
   }
-  if (target.matches("[data-section-target]")) {
-    qsa("[data-section-target]").forEach((btn) => btn.classList.remove("active"));
-    qsa(".app-section").forEach((section) => section.classList.remove("active"));
-    target.classList.add("active");
-    qs(`#${target.dataset.sectionTarget}`).classList.add("active");
+  const sectionButton = target.closest("[data-section-target]");
+  if (sectionButton) {
+    setActiveSection(sectionButton.dataset.sectionTarget);
   }
   if (target.matches("[data-explorer-view]")) {
     state.explorerView = target.dataset.explorerView;
@@ -789,4 +803,5 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") qsa(".modal.show").forEach((modal) => hideModal(modal));
 });
 
+setActiveSection(qs(".app-section.active")?.id || "dashboard");
 refresh();

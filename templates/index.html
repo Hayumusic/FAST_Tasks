@@ -13,9 +13,10 @@
         <div class="brand-mark">
           <div class="brand-glyph">F</div>
           <div>
-            <h1>FASTFlow</h1>
-            <p>AI effort studio</p>
+            <h1>FAST</h1>
+            <p>Automation portfolio</p>
           </div>
+          <button class="sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">‹</button>
         </div>
         <nav class="section-tabs" aria-label="Main sections">
           <button class="active" data-section-target="dashboard"><span class="nav-icon">01</span>Dashboard</button>
@@ -24,7 +25,7 @@
           <button data-section-target="setup"><span class="nav-icon">04</span>Setup</button>
         </nav>
         <div class="sidebar-footer">
-          <span>Small data. Sharp signal.</span>
+          <span>Application Services</span>
         </div>
       </aside>
 
@@ -65,7 +66,7 @@
         <div class="page-heading">
           <div>
             <h2>Dashboard</h2>
-            <p>Plan, prioritize, and track AI and automation use cases with crisp portfolio signal.</p>
+            <p>Track AI and automation demand, delivery status, and estimated value by process hierarchy.</p>
           </div>
           <button class="btn btn-sm btn-primary" id="add-usecase-dashboard" type="button">+ Add Use Case</button>
         </div>
@@ -85,13 +86,10 @@
         <div class="section-toolbar">
           <div>
             <h2>Process Explorer</h2>
-            <p>Browse the hierarchy you upload and attach use cases at process, sub-process, or task level.</p>
+            <p>Review uploaded process hierarchy and attach use cases at process, sub-process, or task level.</p>
           </div>
           <div class="button-row">
-            <div class="view-toggle" aria-label="Explorer view">
-              <button class="btn btn-sm btn-primary" data-explorer-view="board">Board</button>
-              <button class="btn btn-sm btn-outline-secondary" data-explorer-view="tree">Tree</button>
-            </div>
+            <span class="board-mode-label">Board View</span>
             <button class="btn btn-sm btn-outline-secondary" data-expand-all>Expand All</button>
             <button class="btn btn-sm btn-outline-secondary" data-collapse-all>Collapse All</button>
             <button class="btn btn-sm btn-primary" id="add-usecase-from-explorer">Add Use Case</button>
@@ -122,7 +120,7 @@
         <div class="section-toolbar">
           <div>
             <h2>Use Case Register</h2>
-            <p>Central table of AI, automation, and agentic AI opportunities.</p>
+            <p>Operational register for AI, automation, and agentic AI opportunities.</p>
           </div>
           <button class="btn btn-sm btn-primary" id="add-usecase">Add Use Case</button>
         </div>
@@ -178,7 +176,7 @@
         <div class="section-toolbar">
           <div>
             <h2>Setup</h2>
-            <p>Upload your Excel hierarchy and maintain process hierarchy items and pillar labels.</p>
+            <p>Upload the Excel hierarchy and maintain process items and pillar labels.</p>
           </div>
           <div class="button-row">
             <form id="hierarchy-import-form" class="import-form">
@@ -230,12 +228,12 @@
             <label>Contributor<input required name="contributor" class="form-control"></label>
             <label>Created Date<input required name="created_date" type="date" class="form-control"></label>
             <label>Last Updated Date<input required name="updated_date" type="date" class="form-control"></label>
-            <label>Effort Hours / Run<input name="effort_hours" type="number" min="0" step="0.25" class="form-control"></label>
-            <label>Cost / Run<input name="cost_per_run" type="number" min="0" step="0.01" class="form-control"></label>
-            <label>Frequency / Month<input name="frequency_per_month" type="number" min="0" step="1" class="form-control"></label>
-            <label>Savings %<input name="savings_percent" type="number" min="0" max="100" step="1" class="form-control"></label>
-            <label class="wide">Current Problem / Opportunity<textarea required name="problem_statement" class="form-control" rows="3"></textarea></label>
-            <label class="wide">Short Description<textarea required name="short_description" class="form-control" rows="3"></textarea></label>
+            <label>Current Effort Spent / Run<span class="field-help">Hours currently spent to complete this task manually.</span><input name="effort_hours" type="number" min="0" step="0.25" class="form-control" placeholder="Example: 2.5"></label>
+            <label>Equivalent Current Cost / Run<span class="field-help">Current cost for one manual run of this task.</span><input name="cost_per_run" type="number" min="0" step="0.01" class="form-control" placeholder="Example: 1500"></label>
+            <label>Frequency / Month<span class="field-help">How many times this task happens each month.</span><input name="frequency_per_month" type="number" min="0" step="1" class="form-control" placeholder="Example: 20"></label>
+            <label>Savings From Automation %<span class="field-help">Percent of current effort/cost saved by this automation or use case.</span><input name="savings_percent" type="number" min="0" max="100" step="1" class="form-control" placeholder="Example: 60"></label>
+            <label class="wide">Current Problem / Opportunity<span class="field-help">Describe the current pain point, manual work, delay, or opportunity.</span><textarea required name="problem_statement" class="form-control" rows="3"></textarea></label>
+            <label class="wide">Short Description Of The Use Case<span class="field-help">Summarize what the automation or use case will do.</span><textarea required name="short_description" class="form-control" rows="3"></textarea></label>
             <div class="wide estimate-preview" id="estimate-preview"></div>
           </div>
           <div class="modal-footer">

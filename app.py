@@ -575,12 +575,12 @@ def export_excel():
         "Created Date",
         "Last Updated Date",
         "Attached Level",
-        "Effort Hours / Run",
-        "Cost / Run",
+        "Current Effort Spent / Run",
+        "Equivalent Current Cost / Run",
         "Frequency / Month",
-        "Savings %",
-        "Estimated Monthly Cost",
-        "Estimated Monthly Savings",
+        "Savings From Automation %",
+        "Current Monthly Cost",
+        "Monthly Savings From Automation",
     ]
     ws.append(headers)
     for row in rows:
