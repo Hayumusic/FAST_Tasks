@@ -4,14 +4,16 @@ import csv
 import os
 import sqlite3
 from datetime import date, datetime
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
 
-from flask import Flask, g, jsonify, render_template, request, send_file
+from flask import Flask, g, jsonify, render_template, request, send_file, session
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from werkzeug.security import check_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -23,6 +25,7 @@ STATUSES = {"Planned", "WIP", "Built", "Built and Deployed"}
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+app.secret_key = os.environ.get("FAST_SECRET_KEY", "dev-only-change-me-before-hosting")
 
 
 @app.after_request
@@ -52,6 +55,20 @@ def close_db(_: BaseException | None) -> None:
 
 def row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
+
+
+def is_admin() -> bool:
+    return bool(session.get("is_admin"))
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not is_admin():
+            return jsonify({"error": "Admin login required"}), 401
+        return view(*args, **kwargs)
+
+    return wrapped
 
 
 def init_db() -> None:
@@ -367,6 +384,7 @@ def bootstrap():
     use_cases = filtered_use_cases()
     return jsonify(
         {
+            "isAdmin": is_admin(),
             "nodes": get_nodes(),
             "pillars": [row_to_dict(r) for r in get_db().execute("SELECT * FROM pillars ORDER BY name")],
             "useCases": use_cases,
@@ -375,8 +393,33 @@ def bootstrap():
     )
 
 
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    configured_id = os.environ.get("FAST_ADMIN_ID", "").strip()
+    configured_hash = os.environ.get("FAST_ADMIN_PASSWORD_HASH", "").strip()
+    if not configured_id or not configured_hash:
+        return jsonify({"error": "Admin login is not configured"}), 503
+    data = request.get_json() or {}
+    admin_id = str(data.get("admin_id", "")).strip()
+    password = str(data.get("password", ""))
+    if admin_id != configured_id or not check_password_hash(configured_hash, password):
+        return jsonify({"error": "Invalid admin ID or password"}), 401
+    session["is_admin"] = True
+    session["admin_id"] = admin_id
+    return jsonify({"ok": True, "adminId": admin_id})
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("is_admin", None)
+    session.pop("admin_id", None)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/nodes", methods=["POST"])
+@admin_required
 def create_node():
+    init_db()
     data = request.get_json()
     node_type = data.get("type")
     if node_type not in NODE_TYPES:
@@ -393,6 +436,7 @@ def create_node():
 
 
 @app.route("/api/hierarchy/import", methods=["POST"])
+@admin_required
 def import_hierarchy():
     init_db()
     uploaded = request.files.get("file")
@@ -443,7 +487,9 @@ def import_hierarchy():
 
 
 @app.route("/api/nodes/<int:node_id>", methods=["PUT", "DELETE"])
+@admin_required
 def node_detail(node_id: int):
+    init_db()
     db = get_db()
     if request.method == "DELETE":
         db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
@@ -466,7 +512,9 @@ def save_node_pillars(db: sqlite3.Connection, node_id: int, pillar_ids: list[int
 
 
 @app.route("/api/pillars", methods=["POST"])
+@admin_required
 def create_pillar():
+    init_db()
     data = request.get_json()
     cur = get_db().execute("INSERT INTO pillars (name, description) VALUES (?, ?)", (data.get("name", "").strip(), data.get("description", "").strip()))
     get_db().commit()
@@ -474,7 +522,9 @@ def create_pillar():
 
 
 @app.route("/api/pillars/<int:pillar_id>", methods=["PUT", "DELETE"])
+@admin_required
 def pillar_detail(pillar_id: int):
+    init_db()
     db = get_db()
     if request.method == "DELETE":
         db.execute("DELETE FROM pillars WHERE id = ?", (pillar_id,))

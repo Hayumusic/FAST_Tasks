@@ -15,6 +15,9 @@ Example environment:
 FAST_DB_PATH=/opt/fast/data/fast_tracker.sqlite3
 FLASK_DEBUG=false
 PORT=8000
+FAST_SECRET_KEY=<long-random-session-secret>
+FAST_ADMIN_ID=<admin-id>
+FAST_ADMIN_PASSWORD_HASH=<werkzeug-password-hash>
 ```
 
 Start command:
@@ -36,9 +39,19 @@ GET /healthz
 - Set `FLASK_DEBUG=false` in hosted environments.
 - Set `PORT` to the platform-provided port, or default to `8000` with Gunicorn.
 - Set `FAST_DB_PATH` to a persistent disk path if using SQLite.
+- Set `FAST_SECRET_KEY` to a long random value so admin sessions remain secure.
+- Set `FAST_ADMIN_ID` and `FAST_ADMIN_PASSWORD_HASH` to enable Setup access.
 - Do not commit or deploy `instance/fast_tracker.sqlite3`; the app creates an empty database on first start.
 - Back up the SQLite file via Lightsail snapshots or a scheduled copy from the persistent disk.
 - Use `/healthz` for load balancer or uptime checks.
+
+Generate an admin password hash locally:
+
+```sh
+python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('replace-with-admin-password'))"
+```
+
+Setup is admin-only. Dashboard, Process Explorer, Use Cases, and export remain open without login.
 
 If starting from another directory, pass the app folder explicitly:
 

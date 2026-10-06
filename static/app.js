@@ -10,6 +10,7 @@ const state = {
   expandedNodes: new Set(),
   collapsedBoardNodes: new Set(),
   boardCollapseInitialized: false,
+  pendingSetupOpen: false,
 };
 
 const TYPES = ["Automation", "AI", "Agentic AI"];
@@ -25,7 +26,16 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    let message = await response.text();
+    try {
+      message = JSON.parse(message).error || message;
+    } catch (_) {
+      // Keep plain text response.
+    }
+    if (response.status === 401 && path !== "/admin/login") showAdminLogin();
+    throw new Error(message);
+  }
   return response.json();
 }
 
@@ -80,7 +90,28 @@ function renderAll() {
   populateRegistryFilters();
   renderUseCaseTable();
   renderSetup();
+  renderAdminState();
   fillFormSelects();
+}
+
+function renderAdminState() {
+  const status = qs("#admin-status");
+  const logout = qs("#admin-logout");
+  const setup = qs("#setup");
+  if (!status || !logout || !setup) return;
+  setup.classList.toggle("setup-locked", !state.isAdmin);
+  status.textContent = state.isAdmin ? "Admin unlocked" : "Admin access required";
+  logout.hidden = !state.isAdmin;
+  qsa("#hierarchy-import-form label, #add-node, #add-pillar", setup).forEach((el) => {
+    el.classList.toggle("disabled", !state.isAdmin);
+  });
+}
+
+function showAdminLogin() {
+  qs("#admin-login-error").hidden = true;
+  qs("#admin-login-error").textContent = "";
+  qs("#admin-login-form").reset();
+  showModal("#adminLoginModal");
 }
 
 function renderMetrics() {
@@ -629,7 +660,13 @@ document.addEventListener("click", async (event) => {
   }
   const sectionButton = target.closest("[data-section-target]");
   if (sectionButton) {
+    if (sectionButton.dataset.sectionTarget === "setup" && !state.isAdmin) {
+      state.pendingSetupOpen = true;
+      showAdminLogin();
+      return;
+    }
     setActiveSection(sectionButton.dataset.sectionTarget);
+    return;
   }
   if (target.matches("[data-explorer-view]")) {
     state.explorerView = target.dataset.explorerView;
@@ -646,6 +683,12 @@ document.addEventListener("click", async (event) => {
   if (target.matches(".edit-node")) openNode(target.dataset.id);
   if (target.matches("#add-pillar")) openPillar();
   if (target.matches(".edit-pillar")) openPillar(target.dataset.id);
+  if (target.matches("#admin-logout")) {
+    await api("/admin/logout", { method: "POST", body: JSON.stringify({}) });
+    state.isAdmin = false;
+    setActiveSection("dashboard");
+    renderAll();
+  }
   if (target.matches("[data-bs-dismiss='modal'], .btn-close")) hideModal(target.closest(".modal"));
   if (target.matches("#reset-filters")) {
     state.filters = {};
@@ -724,12 +767,51 @@ qs("#hierarchy-file").addEventListener("change", async () => {
   data.append("file", file);
   data.append("replace", qs('[name="replace"]', form).checked ? "true" : "false");
   const response = await fetch("/api/hierarchy/import", { method: "POST", body: data });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    qs("#hierarchy-file").value = "";
+    if (response.status === 401) showAdminLogin();
+    const text = await response.text();
+    let message = text || "Upload failed";
+    try {
+      message = JSON.parse(text).error || message;
+    } catch (_) {
+      // Keep plain text response.
+    }
+    alert(message);
+    return;
+  }
   const result = await response.json();
   form.reset();
   alert(`Imported ${result.processes} processes, ${result.subprocesses} sub-processes, ${result.tasks} task entries, and ${result.pillars} pillars.`);
   state.selectedNodeId = null;
   await refresh();
+});
+
+qs("#admin-login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const error = qs("#admin-login-error");
+  error.hidden = true;
+  error.textContent = "";
+  try {
+    await api("/admin/login", {
+      method: "POST",
+      body: JSON.stringify({
+        admin_id: form.elements.admin_id.value,
+        password: form.elements.password.value,
+      }),
+    });
+    state.isAdmin = true;
+    hideModal("#adminLoginModal");
+    if (state.pendingSetupOpen) {
+      state.pendingSetupOpen = false;
+      setActiveSection("setup");
+    }
+    await refresh();
+  } catch (err) {
+    error.textContent = err.message;
+    error.hidden = false;
+  }
 });
 
 qsa(".filter-panel select").forEach((select) => {
