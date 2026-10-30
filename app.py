@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import os
+import math
 import sqlite3
 from datetime import date, datetime
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, g, jsonify, render_template, request, send_file, session
 from openpyxl import Workbook, load_workbook
@@ -22,6 +24,7 @@ DB_PATH = Path(os.environ.get("FAST_DB_PATH", BASE_DIR / "instance" / "fast_trac
 NODE_TYPES = {"process", "subprocess", "task"}
 USE_CASE_TYPES = {"Automation", "AI", "Agentic AI"}
 STATUSES = {"Planned", "WIP", "Built", "Built and Deployed"}
+OUTPUT_TYPES = {"GPT", "Plugin", "Web tool", "Web app", "Web integration", "Agent", "Workflow", "Script", "Other"}
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
@@ -127,6 +130,12 @@ def init_db() -> None:
             "cost_per_run": "REAL NOT NULL DEFAULT 0",
             "frequency_per_month": "REAL NOT NULL DEFAULT 0",
             "savings_percent": "REAL NOT NULL DEFAULT 0",
+            "app_tags": "TEXT NOT NULL DEFAULT ''",
+            "pillar_id": "INTEGER REFERENCES pillars(id) ON DELETE SET NULL",
+            "effort_unit": "TEXT NOT NULL DEFAULT 'Hours'",
+            "cost_provided": "INTEGER NOT NULL DEFAULT 0",
+            "output_type": "TEXT NOT NULL DEFAULT ''",
+            "tool_url": "TEXT NOT NULL DEFAULT ''",
         },
     )
     db.commit()
@@ -186,9 +195,10 @@ def filtered_use_cases() -> list[dict]:
     values: list[str] = []
     if params.get("pillar"):
         where.append(
-            "EXISTS (SELECT 1 FROM node_pillars np JOIN pillars p ON p.id = np.pillar_id WHERE np.node_id = uc.node_id AND p.name = ?)"
+            "(SELECT name FROM pillars WHERE id = uc.pillar_id) = ? OR (uc.pillar_id IS NULL AND EXISTS (SELECT 1 FROM node_pillars np JOIN pillars p ON p.id = np.pillar_id WHERE np.node_id = uc.node_id AND p.name = ?))"
         )
-        values.append(params["pillar"])
+        where[-1] = "(" + where[-1] + ")"
+        values.extend([params["pillar"], params["pillar"]])
     for key, column in [("process", "path.process_id"), ("subprocess", "path.subprocess_id"), ("type", "uc.use_case_type"), ("status", "uc.status"), ("contributor", "uc.contributor")]:
         if params.get(key):
             where.append(f"{column} = ?")
@@ -200,7 +210,9 @@ def filtered_use_cases() -> list[dict]:
         SELECT
             uc.id,
             uc.node_id,
-            GROUP_CONCAT(p.name, ', ') AS pillar,
+            COALESCE((SELECT name FROM pillars WHERE id = uc.pillar_id), GROUP_CONCAT(p.name, ', ')) AS pillar,
+            uc.pillar_id, uc.app_tags, uc.output_type, uc.tool_url, uc.effort_unit,
+            (uc.cost_provided OR uc.cost_per_run > 0) AS cost_provided,
             path.process_id,
             path.process,
             path.subprocess_id,
@@ -220,6 +232,8 @@ def filtered_use_cases() -> list[dict]:
             uc.cost_per_run,
             uc.frequency_per_month,
             uc.savings_percent,
+            ROUND(uc.effort_hours * uc.frequency_per_month, 6) AS monthly_effort_hours,
+            ROUND(uc.effort_hours * uc.frequency_per_month * uc.savings_percent / 100.0, 6) AS monthly_hours_saved,
             ROUND(uc.cost_per_run * uc.frequency_per_month, 2) AS estimated_monthly_cost,
             ROUND(uc.cost_per_run * uc.frequency_per_month * uc.savings_percent / 100.0, 2) AS estimated_monthly_savings
         FROM use_cases uc
@@ -371,7 +385,7 @@ def hierarchy_payload() -> list[dict]:
 @app.route("/")
 def index():
     init_db()
-    asset_version = max((BASE_DIR / "static" / "app.css").stat().st_mtime_ns, (BASE_DIR / "static" / "app.js").stat().st_mtime_ns)
+    asset_version = max(path.stat().st_mtime_ns for path in (BASE_DIR / "static").glob("*.*"))
     return render_template("index.html", statuses=sorted(STATUSES), use_case_types=sorted(USE_CASE_TYPES), asset_version=asset_version)
 
 
@@ -389,6 +403,8 @@ def bootstrap():
     return jsonify(
         {
             "isAdmin": is_admin(),
+            "contributors": [r[0] for r in get_db().execute("SELECT DISTINCT contributor FROM use_cases WHERE contributor != '' ORDER BY contributor COLLATE NOCASE")],
+            "applications": sorted({tag.strip() for r in get_db().execute("SELECT app_tags FROM use_cases") for tag in r[0].split(',') if tag.strip()}),
             "nodes": get_nodes(),
             "pillars": [row_to_dict(r) for r in get_db().execute("SELECT * FROM pillars ORDER BY name")],
             "useCases": use_cases,
@@ -541,69 +557,86 @@ def pillar_detail(pillar_id: int):
 
 @app.route("/api/use-cases", methods=["POST"])
 def create_use_case():
-    data = request.get_json()
-    today = date.today().isoformat()
-    db = get_db()
-    cur = db.execute(
-        """
-        INSERT INTO use_cases
-        (node_id, title, problem_statement, use_case_type, short_description, status, contributor, created_date, updated_date,
-         effort_hours, cost_per_run, frequency_per_month, savings_percent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            data.get("node_id"),
-            data.get("title", "").strip(),
-            data.get("problem_statement", "").strip(),
-            data.get("use_case_type"),
-            data.get("short_description", "").strip(),
-            data.get("status"),
-            data.get("contributor", "").strip(),
-            data.get("created_date") or today,
-            data.get("updated_date") or today,
-            float(data.get("effort_hours") or 0),
-            float(data.get("cost_per_run") or 0),
-            float(data.get("frequency_per_month") or 0),
-            float(data.get("savings_percent") or 0),
-        ),
-    )
-    db.commit()
-    return jsonify({"id": cur.lastrowid})
+    init_db()
+    try:
+        data = validated_use_case(request.get_json() or {})
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    case_id = insert_use_case(data)
+    get_db().commit()
+    return jsonify({"id": case_id})
+
+
+def validated_use_case(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("Use case must be an object")
+    result = {}
+    for field in ("title", "problem_statement", "short_description", "contributor"):
+        result[field] = str(data.get(field) or "").strip()
+        if not result[field]:
+            raise ValueError(f"{field.replace('_', ' ').title()} is required")
+    result["node_id"] = int(data.get("node_id") or 0)
+    if not get_db().execute("SELECT 1 FROM nodes WHERE id = ?", (result["node_id"],)).fetchone():
+        raise ValueError("Select an existing process, sub-process or task")
+    for field, allowed in (("use_case_type", USE_CASE_TYPES), ("status", STATUSES)):
+        result[field] = data.get(field)
+        if result[field] not in allowed:
+            raise ValueError(f"Invalid {field.replace('_', ' ')}")
+    unit = data.get("effort_unit") or "Hours"
+    if unit not in {"Hours", "Minutes"}:
+        raise ValueError("Effort unit must be Hours or Minutes")
+    result["effort_unit"] = unit
+    for field in ("effort_hours", "cost_per_run", "frequency_per_month", "savings_percent"):
+        value = data.get("effort_value") if field == "effort_hours" and "effort_value" in data else data.get(field)
+        number = float(value or 0)
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"{field.replace('_', ' ').title()} must be a non-negative number")
+        if field == "savings_percent" and number > 100:
+            raise ValueError("Savings percentage cannot exceed 100")
+        result[field] = number / 60 if field == "effort_hours" and "effort_value" in data and unit == "Minutes" else number
+    result["cost_provided"] = int(data.get("cost_per_run") not in (None, ""))
+    result["pillar_id"] = int(data["pillar_id"]) if data.get("pillar_id") else None
+    if result["pillar_id"] and not get_db().execute("SELECT 1 FROM pillars WHERE id = ?", (result["pillar_id"],)).fetchone():
+        raise ValueError("Unknown pillar")
+    tags = str(data.get("app_tags") or "").replace(";", ",").split(",")
+    result["app_tags"] = ", ".join(dict.fromkeys(tag.strip() for tag in tags if tag.strip()))
+    result["output_type"] = str(data.get("output_type") or "").strip()
+    if result["output_type"] and result["output_type"] not in OUTPUT_TYPES:
+        raise ValueError("Invalid output type")
+    result["tool_url"] = str(data.get("tool_url") or "").strip()
+    if result["tool_url"]:
+        parsed = urlparse(result["tool_url"])
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Tool link must be a valid http or https URL")
+    for field in ("created_date", "updated_date"):
+        raw = data.get(field) or date.today().isoformat()
+        result[field] = date.fromisoformat(str(raw)[:10]).isoformat()
+    return result
+
+
+def insert_use_case(data: dict) -> int:
+    fields = list(data)
+    return get_db().execute(
+        f"INSERT INTO use_cases ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+        list(data.values()),
+    ).lastrowid
 
 
 @app.route("/api/use-cases/<int:case_id>", methods=["PUT", "DELETE"])
 def use_case_detail(case_id: int):
+    init_db()
     db = get_db()
+    if not db.execute("SELECT 1 FROM use_cases WHERE id = ?", (case_id,)).fetchone():
+        return jsonify({"error": "Use case not found"}), 404
     if request.method == "DELETE":
         db.execute("DELETE FROM use_cases WHERE id = ?", (case_id,))
         db.commit()
         return jsonify({"ok": True})
-    data = request.get_json()
-    db.execute(
-        """
-        UPDATE use_cases
-        SET node_id = ?, title = ?, problem_statement = ?, use_case_type = ?, short_description = ?,
-            status = ?, contributor = ?, created_date = ?, updated_date = ?,
-            effort_hours = ?, cost_per_run = ?, frequency_per_month = ?, savings_percent = ?
-        WHERE id = ?
-        """,
-        (
-            data.get("node_id"),
-            data.get("title", "").strip(),
-            data.get("problem_statement", "").strip(),
-            data.get("use_case_type"),
-            data.get("short_description", "").strip(),
-            data.get("status"),
-            data.get("contributor", "").strip(),
-            data.get("created_date"),
-            data.get("updated_date") or date.today().isoformat(),
-            float(data.get("effort_hours") or 0),
-            float(data.get("cost_per_run") or 0),
-            float(data.get("frequency_per_month") or 0),
-            float(data.get("savings_percent") or 0),
-            case_id,
-        ),
-    )
+    try:
+        data = validated_use_case(request.get_json() or {})
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    db.execute(f"UPDATE use_cases SET {', '.join(field + ' = ?' for field in data)} WHERE id = ?", [*data.values(), case_id])
     db.commit()
     return jsonify({"ok": True})
 
@@ -635,6 +668,7 @@ def export_excel():
         "Savings From Automation %",
         "Current Monthly Cost",
         "Monthly Savings From Automation",
+        "Applications", "Output Type", "Tool URL", "Monthly Hours Saved", "Node ID", "Effort Unit", "Tagged Pillar",
     ]
     ws.append(headers)
     for row in rows:
@@ -654,13 +688,20 @@ def export_excel():
                 row["updated_date"],
                 row["attached_level"],
                 row["effort_hours"],
-                row["cost_per_run"],
+                row["cost_per_run"] if row["cost_provided"] else None,
                 row["frequency_per_month"],
                 row["savings_percent"],
                 row["estimated_monthly_cost"],
                 row["estimated_monthly_savings"],
+                row["app_tags"], row["output_type"], row["tool_url"], row["monthly_hours_saved"], row["node_id"], "Hours",
+                get_db().execute("SELECT name FROM pillars WHERE id = ?", (row["pillar_id"],)).fetchone()[0] if row["pillar_id"] else "",
             ]
         )
+    # User-entered text must remain text when opened in Excel.
+    for cells in ws.iter_rows():
+        for cell in cells:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="20323A")
@@ -676,6 +717,105 @@ def export_excel():
     buffer.seek(0)
     filename = f"AI_Automation_Use_Cases_{date.today().isoformat()}.xlsx"
     return send_file(buffer, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+IMPORT_FIELDS = {
+    "Node ID": "node_id", "Use Case Title": "title", "Current Problem / Opportunity": "problem_statement",
+    "Short Description": "short_description", "Type": "use_case_type", "Status": "status",
+    "Contributor": "contributor", "Effort Per Run": "effort_value", "Effort Unit": "effort_unit",
+    "Equivalent Current Cost / Run": "cost_per_run", "Frequency / Month": "frequency_per_month",
+    "Savings From Automation %": "savings_percent", "Applications": "app_tags", "Pillar": "pillar",
+    "Output Type": "output_type", "Tool URL": "tool_url", "Created Date": "created_date",
+    "Last Updated Date": "updated_date", "Current Effort Spent / Run": "effort_hours", "Tagged Pillar": "tagged_pillar",
+}
+
+
+@app.route("/api/use-cases/template")
+def use_case_template():
+    init_db()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Use Cases"
+    ws.append([header for header in IMPORT_FIELDS if header not in {"Current Effort Spent / Run", "Tagged Pillar"}])
+    ws.freeze_panes = "A2"
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="20323A")
+        ws.column_dimensions[cell.column_letter].width = 26
+    nodes = wb.create_sheet("Hierarchy Reference")
+    nodes.append(["Node ID", "Level", "Name", "Parent ID"])
+    for node in get_nodes():
+        nodes.append([node["id"], node["type"], node["name"], node["parent_id"]])
+    pillars = wb.create_sheet("Pillar Reference")
+    pillars.append(["Pillar"])
+    for row in get_db().execute("SELECT name FROM pillars ORDER BY name"):
+        pillars.append([row[0]])
+    guide = wb.create_sheet("Instructions")
+    for line in [
+        "Fill the Use Cases sheet. Upload appends records; existing records are never replaced.",
+        "Node ID must match the Hierarchy Reference sheet. Required: title, pain point, description, type, status, contributor.",
+        "Type: Automation, AI, Agentic AI. Status: Planned, WIP, Built, Built and Deployed.",
+        "Effort Unit: Hours or Minutes. Savings %: 0 to 100. Leave cost blank for hours-only savings.",
+        "Applications: comma-separated names. Pillar is optional; use a name from Pillar Reference.",
+        "Output Type: " + ", ".join(sorted(OUTPUT_TYPES)),
+        "Dates are optional (YYYY-MM-DD). Tool URL must start with http:// or https://.",
+    ]:
+        guide.append([line])
+    guide.column_dimensions["A"].width = 120
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name="FAST_Use_Case_Template.xlsx")
+
+
+@app.route("/api/use-cases/import", methods=["POST"])
+def import_use_cases():
+    init_db()
+    uploaded = request.files.get("file")
+    if not uploaded:
+        return jsonify({"error": "Select an Excel or CSV file"}), 400
+    try:
+        if (uploaded.filename or "").lower().endswith(".csv"):
+            rows = list(csv.DictReader(uploaded.read().decode("utf-8-sig").splitlines()))
+        else:
+            wb = load_workbook(uploaded, read_only=True, data_only=True)
+            rows = worksheet_rows(wb["Use Cases"] if "Use Cases" in wb.sheetnames else wb.active)
+            wb.close()
+        if not rows or len(rows) > 5000:
+            raise ValueError("Upload between 1 and 5000 use cases")
+    except Exception as exc:
+        return jsonify({"error": f"Could not read import: {exc}"}), 400
+    fields = {normalize_header(header): field for header, field in IMPORT_FIELDS.items()}
+    validated, errors = [], []
+    for number, row in enumerate(rows, 2):
+        try:
+            data = {fields[normalize_header(key)]: value for key, value in row.items() if normalize_header(key) in fields}
+            # Exports always express the canonical effort column in hours.
+            if "effort_hours" in data and "effort_value" not in data:
+                data["effort_unit"] = "Hours"
+            inherited_pillar = data.pop("pillar", "")
+            pillar = str(data.pop("tagged_pillar", inherited_pillar) or "").strip()
+            if pillar:
+                match = get_db().execute("SELECT id FROM pillars WHERE name = ? COLLATE NOCASE", (pillar,)).fetchone()
+                if not match:
+                    raise ValueError(f"Unknown pillar: {pillar}")
+                data["pillar_id"] = match[0]
+            validated.append(validated_use_case(data))
+        except (ValueError, TypeError, OverflowError) as exc:
+            errors.append(f"Row {number}: {exc}")
+    if errors:
+        return jsonify({"error": "No rows imported. Correct the listed rows and retry.", "errors": errors}), 400
+    if request.form.get("preview") == "true":
+        return jsonify({"count": len(validated), "preview": True})
+    db = get_db()
+    try:
+        for data in validated:
+            insert_use_case(data)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return jsonify({"imported": len(validated)})
 
 
 if __name__ == "__main__":

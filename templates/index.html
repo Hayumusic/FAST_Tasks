@@ -6,14 +6,15 @@
     <title>FAST AI & Automation Effort Tracker</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='registry.css') }}?v={{ asset_version }}">
   </head>
   <body>
     <div class="app-frame">
       <aside class="sidebar">
         <div class="brand-mark">
-          <div class="brand-glyph">F</div>
+          <button class="brand-glyph home-button" type="button" data-section-target="dashboard" aria-label="Home - Dashboard" title="Home">F</button>
           <div>
-            <h1>FAST</h1>
+            <h1><button class="brand-home" type="button" data-section-target="dashboard">FAST</button></h1>
             <p>Automation portfolio</p>
           </div>
           <button class="sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">‹</button>
@@ -86,10 +87,9 @@
         <div class="section-toolbar">
           <div>
             <h2>Process Explorer</h2>
-            <p>Review uploaded process hierarchy and attach use cases at process, sub-process, or task level.</p>
           </div>
           <div class="button-row">
-            <span class="board-mode-label">Board View</span>
+            <label class="populated-toggle"><input type="checkbox" id="populated-only">With use cases only</label>
             <button class="btn btn-sm btn-outline-secondary" data-expand-all>Expand All</button>
             <button class="btn btn-sm btn-outline-secondary" data-collapse-all>Collapse All</button>
             <button class="btn btn-sm btn-primary" id="add-usecase-from-explorer">Add Use Case</button>
@@ -125,50 +125,21 @@
             <h2>Use Case Register</h2>
             <p>Operational register for AI, automation, and agentic AI opportunities.</p>
           </div>
-          <button class="btn btn-sm btn-primary" id="add-usecase">Add Use Case</button>
+          <div class="button-row">
+            <button class="btn btn-sm btn-outline-secondary" id="bulk-upload-open">Bulk Upload</button>
+            <button class="btn btn-sm btn-primary" id="add-usecase">Add Use Case</button>
+          </div>
         </div>
         <article class="panel table-panel">
           <div class="registry-summary">
             <strong id="registry-count">0 use cases</strong>
             <span id="registry-filter-note">No table filters applied</span>
             <button class="btn btn-sm btn-outline-secondary" id="reset-registry-filters" type="button">Clear Table Filters</button>
+            <button class="btn btn-sm btn-outline-secondary" id="reset-column-widths" type="button">Reset Columns</button>
           </div>
           <div class="table-responsive">
             <table class="table align-middle" id="usecase-table">
-              <thead>
-                <tr>
-                  <th>Pillar</th>
-                  <th>Process</th>
-                  <th>Sub-process</th>
-                  <th>Task</th>
-                  <th>Use Case Title</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Short Description</th>
-                  <th>Monthly Cost</th>
-                  <th>Monthly Savings</th>
-                  <th>Contributor</th>
-                  <th>Created</th>
-                  <th>Updated</th>
-                  <th></th>
-                </tr>
-                <tr class="table-filter-row">
-                  <th><input class="table-filter" data-table-filter="pillar" placeholder="Filter"></th>
-                  <th><select class="table-filter" data-table-filter="process"></select></th>
-                  <th><select class="table-filter" data-table-filter="subprocess"></select></th>
-                  <th><select class="table-filter" data-table-filter="task"></select></th>
-                  <th><input class="table-filter" data-table-filter="title" placeholder="Filter"></th>
-                  <th><select class="table-filter" data-table-filter="use_case_type"></select></th>
-                  <th><select class="table-filter" data-table-filter="status"></select></th>
-                  <th><input class="table-filter" data-table-filter="short_description" placeholder="Filter"></th>
-                  <th><select class="table-filter" data-table-filter="sort_cost"></select></th>
-                  <th><select class="table-filter" data-table-filter="sort_savings"></select></th>
-                  <th><input class="table-filter" data-table-filter="contributor" placeholder="Filter"></th>
-                  <th><input class="table-filter" data-table-filter="created_date" placeholder="YYYY-MM-DD"></th>
-                  <th><input class="table-filter" data-table-filter="updated_date" placeholder="YYYY-MM-DD"></th>
-                  <th></th>
-                </tr>
-              </thead>
+              <thead></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -230,16 +201,24 @@
             <label>Task<select name="task_id" class="form-select"></select></label>
             <label>Type<select required name="use_case_type" class="form-select"></select></label>
             <label>Status<select required name="status" class="form-select"></select></label>
-            <label>Contributor<input required name="contributor" class="form-control"></label>
+            <label>Contributor<select required name="contributor_choice" class="form-select" aria-label="Contributor"></select></label>
+            <label id="new-contributor-label">New Contributor<input name="contributor" class="form-control" autocomplete="name"></label>
+            <label>Applications<input name="app_tags" class="form-control" list="application-names" placeholder="ServiceNow, SAP, Workday"></label>
+            <datalist id="application-names"></datalist>
+            <label>Pillar (Optional)<select name="pillar_id" class="form-select"></select></label>
+            <label>Output Type<select name="output_type" class="form-select"></select></label>
+            <label class="wide">Tool / GPT / Agent Link<input name="tool_url" type="url" class="form-control" placeholder="https://"></label>
             <label>Created Date<input required name="created_date" type="date" class="form-control"></label>
             <label>Last Updated Date<input required name="updated_date" type="date" class="form-control"></label>
-            <label>Current Effort Spent / Run<span class="field-help">Hours currently spent to complete this task manually.</span><input name="effort_hours" type="number" min="0" step="0.25" class="form-control" placeholder="Example: 2.5"></label>
+            <label>Current Effort / Run<input name="effort_value" type="number" min="0" step="any" class="form-control" placeholder="Example: 30"></label>
+            <label>Effort Unit<select name="effort_unit" class="form-select"><option>Minutes</option><option>Hours</option></select></label>
             <label>Equivalent Current Cost / Run<span class="field-help">Current cost for one manual run of this task.</span><input name="cost_per_run" type="number" min="0" step="0.01" class="form-control" placeholder="Example: 1500"></label>
             <label>Frequency / Month<span class="field-help">How many times this task happens each month.</span><input name="frequency_per_month" type="number" min="0" step="1" class="form-control" placeholder="Example: 20"></label>
-            <label>Savings From Automation %<span class="field-help">Percent of current effort/cost saved by this automation or use case.</span><input name="savings_percent" type="number" min="0" max="100" step="1" class="form-control" placeholder="Example: 60"></label>
+            <label>Savings From Automation %<span class="field-help">100% for a fully automated task; lower for partial savings.</span><input name="savings_percent" type="number" min="0" max="100" step="any" value="100" class="form-control"></label>
             <label class="wide">Current Problem / Opportunity<span class="field-help">Describe the current pain point, manual work, delay, or opportunity.</span><textarea required name="problem_statement" class="form-control" rows="3"></textarea></label>
             <label class="wide">Short Description Of The Use Case<span class="field-help">Summarize what the automation or use case will do.</span><textarea required name="short_description" class="form-control" rows="3"></textarea></label>
-            <div class="wide estimate-preview" id="estimate-preview"></div>
+            <div class="wide estimate-preview" id="estimate-preview" aria-live="polite"></div>
+            <div class="wide admin-login-error" id="usecase-error" role="alert" hidden></div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-danger me-auto" id="delete-usecase">Delete</button>
@@ -316,6 +295,19 @@
       </div>
     </div>
 
+    <div class="modal" id="bulkUploadModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="bulk-upload-form">
+          <div class="modal-header"><h3 class="modal-title">Bulk Upload Use Cases</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+          <div class="modal-body form-grid single">
+            <a class="btn btn-outline-secondary" href="/api/use-cases/template">Download Excel Template</a>
+            <label>Excel / CSV File<input required type="file" name="file" accept=".xlsx,.csv" class="form-control"></label>
+            <div id="bulk-result" role="status" aria-live="polite"></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary" id="bulk-submit">Validate File</button></div>
+        </form>
+      </div>
+    </div>
     <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
   </body>
 </html>

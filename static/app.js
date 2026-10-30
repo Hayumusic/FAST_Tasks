@@ -15,6 +15,9 @@ const state = {
 
 const TYPES = ["Automation", "AI", "Agentic AI"];
 const STATUSES = ["Planned", "WIP", "Built", "Built and Deployed"];
+const OUTPUT_TYPES = ["GPT", "Plugin", "Web tool", "Web app", "Web integration", "Agent", "Workflow", "Script", "Other"];
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+const numberText = (value) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -59,7 +62,7 @@ function cleanFilters() {
 function populateSelect(select, options, value = "", label = "All") {
   const current = select.value || value;
   select.innerHTML = `<option value="">${label}</option>` + options.map((option) => (
-    `<option value="${option.value}">${option.label}</option>`
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
   )).join("");
   select.value = current;
 }
@@ -71,7 +74,7 @@ function populateFilters() {
   populateSelect(qs("#filter-subprocess"), subprocesses.map((n) => ({ value: n.id, label: n.name })));
   populateSelect(qs("#filter-type"), TYPES.map((value) => ({ value, label: value })));
   populateSelect(qs("#filter-status"), STATUSES.map((value) => ({ value, label: value })));
-  const contributors = [...new Set(state.useCases.map((uc) => uc.contributor).filter(Boolean))].sort();
+  const contributors = state.contributors || [];
   populateSelect(qs("#filter-contributor"), contributors.map((value) => ({ value, label: value })));
   Object.entries(state.filters).forEach(([key, value]) => {
     const el = qs(`#filter-${key}`);
@@ -126,6 +129,7 @@ function renderMetrics() {
     "Agentic AI": countBy("use_case_type", "Agentic AI"),
     "Monthly Cost": money(sumBy("estimated_monthly_cost")),
     "Monthly Savings": money(sumBy("estimated_monthly_savings")),
+    "Hours Saved / Month": numberText(sumBy("monthly_hours_saved")),
   };
   qs("#metric-grid").innerHTML = Object.entries(counts).map(([label, value]) => `
     <div class="metric-card"><strong>${value}</strong><span>${label}</span></div>
@@ -156,9 +160,10 @@ function groupedAttachedItems() {
     const level = hierarchyLevelLabel(uc.attached_level || "");
     const label = uc.attached_level === "process" ? uc.process : uc.attached_level === "subprocess" ? uc.subprocess : uc.task;
     if (!level || !label) return;
-    const key = `${level}::${label}`;
-    const current = map.get(key) || { level, label, count: 0 };
+    const key = String(uc.node_id);
+    const current = map.get(key) || { level, label, count: 0, cases: [] };
     current.count += 1;
+    current.cases.push(uc);
     map.set(key, current);
   });
   return [...map.values()].sort((a, b) => b.count - a.count || a.level.localeCompare(b.level) || a.label.localeCompare(b.label));
@@ -170,17 +175,11 @@ function renderDashboardLists() {
 
   qs("#ranked-list").innerHTML = concentration.length ? `
     <div class="panel-total"><strong>${actualTotal}</strong><span>actual use case${actualTotal === 1 ? "" : "s"} in current filter</span></div>
-    <div class="concentration-header" aria-hidden="true">
-      <span>Level</span>
-      <span>Attached Item</span>
-      <span>Use Cases</span>
-    </div>
     ${concentration.map((item) => `
-    <div class="concentration-row">
-      <span class="level-badge level-${item.level.toLowerCase().replace(/[^a-z]+/g, "-")}">${item.level}</span>
-      <strong>${item.label}</strong>
-      <span class="concentration-count">${item.count} use case${item.count === 1 ? "" : "s"}</span>
-    </div>
+    <details class="concentration-topic" ${item.count === 1 ? "open" : ""}>
+      <summary><span class="level-badge">${escapeHtml(item.level)}</span><strong>${escapeHtml(item.label)}</strong><span>${item.count} use case${item.count === 1 ? "" : "s"}</span></summary>
+      ${item.cases.map((uc) => `<div class="topic-case"><button class="btn btn-link edit-usecase" data-id="${uc.id}">${escapeHtml(uc.title)}</button><span>${escapeHtml(uc.status)}</span><strong>${numberText(uc.monthly_hours_saved)} h saved / month</strong></div>`).join("")}
+    </details>
   `).join("")}
   ` : empty("No matching use cases");
 }
@@ -222,43 +221,23 @@ function renderNode(node, options) {
 
 function renderProcessBoard() {
   if (qs("#process-tree")) qs("#process-tree").style.display = "none";
-  qs("#process-board").style.display = "grid";
-  qs("#process-board").innerHTML = state.hierarchy.map((process) => `
-    <section class="process-column${state.collapsedBoardNodes.has(Number(process.id)) ? " collapsed" : ""}">
-      <button class="board-process node-process${Number(state.selectedNodeId) === Number(process.id) ? " selected" : ""}" data-node-id="${process.id}">
-        ${boardToggle(process)}
-        <span class="node-bullet node-bullet-process" aria-hidden="true"></span>
-        <strong>${process.name}</strong>
-        <span class="board-count">${process.counts?.total || 0}</span>
-        <span class="board-add" data-add-usecase-node="${process.id}" aria-label="Add use case to ${process.name}">Add</span>
-      </button>
-      <div class="subprocess-stack${state.collapsedBoardNodes.has(Number(process.id)) ? " collapsed" : ""}">
-        ${(process.children || []).map((subprocess) => `
-          <div class="subprocess-card${state.collapsedBoardNodes.has(Number(subprocess.id)) ? " collapsed" : ""}">
-            <button class="board-subprocess node-subprocess${Number(state.selectedNodeId) === Number(subprocess.id) ? " selected" : ""}" data-node-id="${subprocess.id}">
-              ${boardToggle(subprocess)}
-              <span class="node-bullet node-bullet-subprocess" aria-hidden="true"></span>
-              <strong>${subprocess.name}</strong>
-              <span class="board-count">${subprocess.counts?.total || 0}</span>
-              <span class="board-add" data-add-usecase-node="${subprocess.id}" aria-label="Add use case to ${subprocess.name}">Add</span>
-            </button>
-            <div class="task-stack${state.collapsedBoardNodes.has(Number(subprocess.id)) ? " collapsed" : ""}">
-              ${(subprocess.children || []).map((task) => `
-                <div class="task-branch">
-                  <button class="task-chip node-task${Number(state.selectedNodeId) === Number(task.id) ? " selected" : ""}" data-node-id="${task.id}">
-                    <span class="node-bullet node-bullet-task" aria-hidden="true"></span>
-                    <span>${task.name}</span>
-                    <strong>${task.counts?.total || 0}</strong>
-                    <i class="board-add" data-add-usecase-node="${task.id}" aria-label="Add use case to ${task.name}">Add</i>
-                  </button>
-                </div>
-              `).join("") || empty("No tasks uploaded")}
-            </div>
-          </div>
-        `).join("") || empty("No sub-processes uploaded")}
+  qs("#process-board").style.display = "block";
+  const populatedOnly = qs("#populated-only").checked;
+  const row = (node, depth = 0) => {
+    const count = node.counts?.total || 0;
+    if (populatedOnly && !count) return "";
+    const collapsed = state.collapsedBoardNodes.has(Number(node.id));
+    return `<div class="explorer-branch">
+      <div class="explorer-row ${count ? 'has-cases' : ''} ${Number(state.selectedNodeId) === Number(node.id) ? 'selected' : ''}" style="--depth:${depth}">
+        ${node.children?.length ? `<button type="button" class="branch-toggle" data-board-toggle="${node.id}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(node.name)}" aria-expanded="${!collapsed}">${collapsed ? '&#8250;' : '&#8964;'}</button>` : '<span class="branch-spacer"></span>'}
+        <button class="branch-name" data-node-id="${node.id}" type="button"><span class="branch-level">${hierarchyLevelLabel(node.type)}</span><strong>${escapeHtml(node.name)}</strong></button>
+        <span class="branch-count">${count} <span>use case${count === 1 ? '' : 's'}</span></span>
+        <button type="button" class="branch-add" data-add-usecase-node="${node.id}" aria-label="Add use case to ${escapeHtml(node.name)}" title="Add use case">+</button>
       </div>
-    </section>
-  `).join("") || empty("Upload a hierarchy to build the board");
+      ${!collapsed ? (node.children || []).map((child) => row(child, depth + 1)).join('') : ''}
+    </div>`;
+  };
+  qs("#process-board").innerHTML = state.hierarchy.map((node) => row(node)).join("") || empty("No matching hierarchy items");
 }
 
 function directUseCases(nodeId) {
@@ -323,7 +302,10 @@ function renderSelectedNode() {
   const total = hierarchyNode?.counts?.total || 0;
   qs("#selected-node-meta").textContent = `${titleCase(node.type)} · ${total} use case${total === 1 ? "" : "s"} · ${node.pillars || "No pillars"}`;
   qs("#selected-node-description").textContent = node.description || "No description provided.";
-  const cases = state.useCases.filter((uc) => Number(uc.node_id) === Number(node.id));
+  const descendantIds = new Set();
+  const collect = (item) => { if (item) { descendantIds.add(Number(item.id)); (item.children || []).forEach(collect); } };
+  collect(hierarchyNode);
+  const cases = state.useCases.filter((uc) => descendantIds.has(Number(uc.node_id)));
   qs("#selected-node-cases").innerHTML = cases.map((uc) => useCaseCard(uc)).join("") || empty("No use cases attached directly to this item");
 }
 
@@ -339,13 +321,35 @@ function findHierarchyNode(nodeId, nodes = state.hierarchy) {
 function useCaseCard(uc) {
   return `
     <div class="case-card">
-      <h3>${uc.title}</h3>
-      <p>${uc.short_description}</p>
+      <h3>${escapeHtml(uc.title)}</h3>
+      <p>${escapeHtml(uc.short_description)}</p>
+      <div class="case-savings">${numberText(uc.monthly_hours_saved)} h saved / month</div>
+      ${uc.tool_url ? `<a href="${escapeHtml(uc.tool_url)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(uc.output_type || 'tool')}</a>` : ''}
       <span class="status-pill ${statusClass(uc.status)}">${uc.status}</span>
       <span class="pill">${uc.use_case_type}</span>
       <button class="btn btn-sm btn-link float-end edit-usecase" data-id="${uc.id}">Edit</button>
     </div>
   `;
+}
+
+const REGISTRY_COLUMNS = [
+  ["title", "Use Case Title", 250], ["problem_statement", "Pain Point / Opportunity", 300],
+  ["short_description", "Use Case Description", 300], ["app_tags", "Applications", 190],
+  ["pillar", "Pillar", 200], ["process", "Process", 230], ["subprocess", "Sub-process", 210], ["task", "Task", 260],
+  ["use_case_type", "Type", 130], ["output_type", "Output", 140], ["tool_url", "Tool Link", 180],
+  ["status", "Status", 150], ["monthly_hours_saved", "Hours Saved / Month", 170],
+  ["estimated_monthly_cost", "Current Cost / Month", 170], ["estimated_monthly_savings", "Cost Saved / Month", 170],
+  ["contributor", "Contributor", 180], ["created_date", "Created", 130], ["updated_date", "Updated", 130], ["actions", "", 90],
+];
+let columnWidths = {};
+try { columnWidths = JSON.parse(localStorage.getItem("fast-column-widths") || "{}"); } catch (_) {}
+
+function initRegistry() {
+  const table = qs("#usecase-table");
+  table.style.width = `${REGISTRY_COLUMNS.reduce((total, [key, , width]) => total + (Number(columnWidths[key]) || width), 0)}px`;
+  table.innerHTML = `<colgroup>${REGISTRY_COLUMNS.map(([key, , width]) => `<col data-column="${key}" style="width:${Number(columnWidths[key]) || width}px">`).join('')}</colgroup>
+    <thead><tr>${REGISTRY_COLUMNS.map(([key, label]) => `<th scope="col" data-header-column="${key}">${label}${['monthly_hours_saved', 'estimated_monthly_cost', 'estimated_monthly_savings'].includes(key) ? `<button type="button" class="column-sort" data-sort-column="${key}" aria-label="Sort ${label}" title="Sort ${label}">&#8597;</button>` : ''}${key !== 'actions' ? `<span class="column-resizer" data-resize-column="${key}" role="separator" aria-orientation="vertical" aria-label="Resize ${label}" tabindex="0"></span>` : ''}</th>`).join('')}</tr>
+    <tr class="table-filter-row">${REGISTRY_COLUMNS.map(([key]) => `<th>${key === 'actions' ? '' : ['use_case_type', 'output_type', 'status', 'contributor', 'process', 'subprocess', 'task'].includes(key) ? `<select class="table-filter" data-table-filter="${key}" aria-label="Filter ${key}"></select>` : ['monthly_hours_saved', 'estimated_monthly_cost', 'estimated_monthly_savings'].includes(key) ? '' : `<input class="table-filter" data-table-filter="${key}" placeholder="Filter" aria-label="Filter ${key}">`}</th>`).join('')}</tr></thead><tbody></tbody>`;
 }
 
 function renderUseCaseTable() {
@@ -354,24 +358,17 @@ function renderUseCaseTable() {
   const total = state.useCases.length;
   qs("#registry-count").textContent = `${rows.length} of ${total} use case${total === 1 ? "" : "s"}`;
   qs("#registry-filter-note").textContent = appliedCount ? `${appliedCount} table filter${appliedCount === 1 ? "" : "s"} applied` : "No table filters applied";
-  qs("#usecase-table tbody").innerHTML = rows.map((uc) => `
-    <tr>
-      <td>${pillHtml(uc.pillar)}</td>
-      <td>${uc.process || ""}</td>
-      <td>${uc.subprocess || ""}</td>
-      <td>${uc.task || ""}</td>
-      <td><div class="row-title">${uc.title}</div><small class="text-muted">${uc.problem_statement}</small></td>
-      <td>${uc.use_case_type}</td>
-      <td><span class="status-pill ${statusClass(uc.status)}">${uc.status}</span></td>
-      <td>${uc.short_description}</td>
-      <td>${money(uc.estimated_monthly_cost)}</td>
-      <td>${money(uc.estimated_monthly_savings)}</td>
-      <td>${uc.contributor}</td>
-      <td>${uc.created_date}</td>
-      <td>${uc.updated_date}</td>
-      <td><button class="btn btn-sm btn-outline-secondary edit-usecase" data-id="${uc.id}">Edit</button></td>
-    </tr>
-  `).join("") || `<tr><td colspan="14">${empty("No use cases match the current filters")}</td></tr>`;
+  qs("#usecase-table tbody").innerHTML = rows.map((uc) => `<tr>${REGISTRY_COLUMNS.map(([key]) => {
+    let value = escapeHtml(uc[key]);
+    if (key === 'title') value = `<button class="registry-title edit-usecase" data-id="${uc.id}">${value}</button>`;
+    if (key === 'status') value = `<span class="status-pill ${statusClass(uc.status)}">${value}</span>`;
+    if (['pillar', 'app_tags'].includes(key)) value = pillHtml(uc[key]);
+    if (key === 'monthly_hours_saved') value = `<strong>${numberText(uc[key])} h</strong>`;
+    if (key.startsWith('estimated_monthly_')) value = uc.cost_provided ? money(uc[key]) : '<span class="unpriced">Not provided</span>';
+    if (key === 'tool_url') value = uc.tool_url ? `<a href="${escapeHtml(uc.tool_url)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(uc.output_type || 'tool')} &#8599;</a>` : '';
+    if (key === 'actions') value = `<button class="btn btn-sm btn-outline-secondary edit-usecase" data-id="${uc.id}">Edit</button>`;
+    return `<td>${value}</td>`;
+  }).join('')}</tr>`).join('') || `<tr><td colspan="${REGISTRY_COLUMNS.length}">${empty("No use cases match the current filters")}</td></tr>`;
 }
 
 function populateRegistryFilters() {
@@ -382,6 +379,8 @@ function populateRegistryFilters() {
       let label = "All";
       if (key === "status") options = STATUSES;
       else if (key === "use_case_type") options = TYPES;
+      else if (key === "output_type") options = OUTPUT_TYPES;
+      else if (key === "contributor") options = state.contributors || [];
       else if (["process", "subprocess", "task"].includes(key)) options = uniqueRegistryValues(key);
       else if (key === "sort_cost" || key === "sort_savings") {
         label = "Sort";
@@ -393,7 +392,7 @@ function populateRegistryFilters() {
       control.innerHTML = `<option value="">${label}</option>` + options.map((option) => {
         const value = typeof option === "string" ? option : option.value;
         const text = typeof option === "string" ? option : option.label;
-        return `<option value="${value}">${text}</option>`;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`;
       }).join("");
     }
     control.value = state.registryFilters[key] || "";
@@ -402,12 +401,12 @@ function populateRegistryFilters() {
 
 function filteredRegistryUseCases() {
   const filters = Object.fromEntries(Object.entries(state.registryFilters).filter(([key, value]) => value && !key.startsWith("sort_")));
-  const sortKey = state.registryFilters.sort_cost ? "estimated_monthly_cost" : state.registryFilters.sort_savings ? "estimated_monthly_savings" : "";
-  const sortDirection = state.registryFilters.sort_cost || state.registryFilters.sort_savings || "";
+  const sortKey = state.registrySort?.key || "";
+  const sortDirection = state.registrySort?.direction || "";
   let rows = state.useCases.filter((uc) => Object.entries(filters).every(([key, raw]) => {
     const value = String(raw || "").toLowerCase().trim();
     if (!value) return true;
-    if (["process", "subprocess", "task", "use_case_type", "status"].includes(key)) {
+    if (["process", "subprocess", "task", "use_case_type", "status", "output_type", "contributor"].includes(key)) {
       return String(uc[key] || "") === String(raw || "");
     }
     return String(uc[key] || "").toLowerCase().includes(value);
@@ -431,7 +430,7 @@ function money(value) {
 }
 
 function pillHtml(text = "") {
-  return String(text || "").split(",").filter(Boolean).map((x) => `<span class="pill">${x.trim()}</span>`).join("");
+  return String(text || "").split(",").filter(Boolean).map((x) => `<span class="pill">${escapeHtml(x.trim())}</span>`).join("");
 }
 
 function renderSetup() {
@@ -451,6 +450,12 @@ function renderSetup() {
 
 function fillFormSelects() {
   fillHierarchyPicker();
+  const form = qs("#usecase-form");
+  form.elements.pillar_id.innerHTML = '<option value="">No additional pillar</option>' + state.pillars.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+  form.elements.output_type.innerHTML = '<option value="">Select output type</option>' + OUTPUT_TYPES.map((type) => `<option>${type}</option>`).join("");
+  form.elements.contributor_choice.innerHTML = '<option value="">Select contributor</option>' + (state.contributors || []).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("") + '<option value="__new__">Add new contributor...</option>';
+  if (!state.contributors?.length) form.elements.contributor_choice.value = "__new__";
+  qs("#application-names").innerHTML = (state.applications || []).map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   qsa('[name="use_case_type"]').forEach((select) => { select.innerHTML = TYPES.map((t) => `<option>${t}</option>`).join(""); });
   qsa('[name="status"]').forEach((select) => { select.innerHTML = STATUSES.map((s) => `<option>${s}</option>`).join(""); });
   qsa('[name="type"]').forEach((select) => { select.innerHTML = ["process", "subprocess", "task"].map((t) => `<option value="${t}">${titleCase(t)}</option>`).join(""); });
@@ -459,7 +464,14 @@ function fillFormSelects() {
 }
 
 function optionsHtml(nodes, placeholder) {
-  return `<option value="">${placeholder}</option>` + nodes.map((node) => `<option value="${node.id}">${node.name}</option>`).join("");
+  return `<option value="">${placeholder}</option>` + nodes.map((node) => `<option value="${node.id}">${escapeHtml(node.name)}</option>`).join("");
+}
+
+function syncContributorInput() {
+  const form = qs("#usecase-form");
+  const isNew = form.elements.contributor_choice.value === "__new__";
+  qs("#new-contributor-label").hidden = !isNew;
+  form.elements.contributor.required = isNew;
 }
 
 function fillHierarchyPicker(selection = {}) {
@@ -514,14 +526,18 @@ function empty(message) {
 }
 
 function formData(form) {
-  syncHierarchyNodeId(form);
+  if (form.id === "usecase-form") syncHierarchyNodeId(form);
   const data = Object.fromEntries(new FormData(form).entries());
   if (form.id === "node-form") data.pillar_ids = qsa('[name="pillar_ids"] option:checked', form).map((o) => Number(o.value));
   if (data.node_id) data.node_id = Number(data.node_id);
   if (data.parent_id) data.parent_id = Number(data.parent_id);
-  ["effort_hours", "cost_per_run", "frequency_per_month", "savings_percent"].forEach((field) => {
+  ["effort_value", "frequency_per_month", "savings_percent"].forEach((field) => {
     if (field in data) data[field] = Number(data[field] || 0);
   });
+  if (form.id === "usecase-form") {
+    data.contributor = data.contributor_choice === "__new__" ? data.contributor.trim() : data.contributor_choice;
+    delete data.contributor_choice;
+  }
   delete data.process_id;
   delete data.subprocess_id;
   delete data.task_id;
@@ -535,9 +551,12 @@ function updateEstimatePreview() {
   const savings = Number(form.elements.savings_percent.value || 0);
   const monthlyCost = cost * frequency;
   const monthlySavings = monthlyCost * savings / 100;
+  const effort = Number(form.elements.effort_value.value || 0) / (form.elements.effort_unit.value === "Minutes" ? 60 : 1);
+  const hoursSaved = effort * frequency * savings / 100;
   qs("#estimate-preview").innerHTML = `
-    <strong>Current monthly cost: ${money(monthlyCost)}</strong>
-    <strong>Monthly savings from automation: ${money(monthlySavings)}</strong>
+    <div><span>Current hours / month</span><strong>${numberText(effort * frequency)} h</strong></div>
+    <div><span>Hours saved / month</span><strong>${numberText(hoursSaved)} h</strong></div>
+    <div><span>Cost saved / month</span><strong>${form.elements.cost_per_run.value !== "" ? money(monthlySavings) : "Cost not provided"}</strong></div>
   `;
 }
 
@@ -545,6 +564,7 @@ function openUseCase(id = null, nodeId = null) {
   const form = qs("#usecase-form");
   form.reset();
   fillFormSelects();
+  qs("#usecase-error").hidden = true;
   qs("#delete-usecase").style.display = id ? "block" : "none";
   form.elements.id.value = id || "";
   form.elements.created_date.value = today();
@@ -557,8 +577,12 @@ function openUseCase(id = null, nodeId = null) {
       if (form.elements[key]) form.elements[key].value = value ?? "";
     });
     fillHierarchyPicker(hierarchySelectionForNode(uc.node_id));
+    form.elements.effort_value.value = Number(uc.effort_hours) * (uc.effort_unit === "Minutes" ? 60 : 1);
+    form.elements.cost_per_run.value = uc.cost_provided ? uc.cost_per_run : "";
+    form.elements.contributor_choice.value = uc.contributor;
     updateEstimatePreview();
   }
+  syncContributorInput();
   showModal("#useCaseModal");
 }
 
@@ -682,6 +706,20 @@ document.addEventListener("click", async (event) => {
     renderAll();
   }
   if (target.matches("#add-usecase, #add-usecase-dashboard")) openUseCase();
+  if (target.closest("#bulk-upload-open")) {
+    qs("#bulk-upload-form").reset();
+    qs("#bulk-result").textContent = "";
+    bulkValidated = false;
+    qs("#bulk-submit").textContent = "Validate File";
+    showModal("#bulkUploadModal");
+  }
+  if (target.closest("#reset-column-widths")) {
+    columnWidths = {};
+    localStorage.removeItem("fast-column-widths");
+    initRegistry();
+    populateRegistryFilters();
+    renderUseCaseTable();
+  }
   if (target.matches("#add-usecase-from-explorer")) openUseCase(null, state.selectedNodeId);
   if (target.matches(".edit-usecase")) openUseCase(target.dataset.id);
   if (target.matches("#add-node")) openNode();
@@ -702,10 +740,23 @@ document.addEventListener("click", async (event) => {
   }
   if (target.matches("#reset-registry-filters")) {
     state.registryFilters = {};
+    state.registrySort = null;
+    qsa('[data-header-column]').forEach((header) => header.removeAttribute('aria-sort'));
     qsa(".table-filter").forEach((control) => { control.value = ""; });
     qs("#global-search").value = "";
     renderUseCaseTable();
   }
+});
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-sort-column]');
+  if (!button) return;
+  const key = button.dataset.sortColumn;
+  const direction = state.registrySort?.key === key && state.registrySort.direction === 'desc' ? 'asc' : 'desc';
+  state.registrySort = { key, direction };
+  qsa('[data-header-column]').forEach((header) => header.removeAttribute('aria-sort'));
+  qs(`[data-header-column="${key}"]`).setAttribute('aria-sort', direction === 'desc' ? 'descending' : 'ascending');
+  renderUseCaseTable();
 });
 
 document.addEventListener("input", (event) => {
@@ -747,12 +798,14 @@ document.addEventListener("change", (event) => {
 
 qsa("#usecase-form input").forEach((input) => {
   input.addEventListener("input", () => {
-    if (["cost_per_run", "frequency_per_month", "savings_percent"].includes(input.name)) updateEstimatePreview();
+    if (["effort_value", "cost_per_run", "frequency_per_month", "savings_percent"].includes(input.name)) updateEstimatePreview();
   });
 });
 
 qs("#usecase-form").addEventListener("change", (event) => {
   const form = qs("#usecase-form");
+  if (event.target.name === "effort_unit") updateEstimatePreview();
+  if (event.target.name === "contributor_choice") syncContributorInput();
   if (event.target.name === "process_id") {
     fillHierarchyPicker({ process_id: event.target.value });
   }
@@ -829,6 +882,11 @@ qsa(".filter-panel select").forEach((select) => {
 
 qs("#usecase-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const error = qs("#usecase-error");
+  error.hidden = true;
+  const submit = event.target.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
   const data = formData(event.target);
   const id = data.id;
   delete data.id;
@@ -837,6 +895,12 @@ qs("#usecase-form").addEventListener("submit", async (event) => {
   qsa(".filter-panel select").forEach((select) => { select.value = ""; });
   hideModal("#useCaseModal");
   await refresh();
+  } catch (err) {
+    error.textContent = err.message;
+    error.hidden = false;
+  } finally {
+    submit.disabled = false;
+  }
 });
 
 qs("#node-form").addEventListener("submit", async (event) => {
@@ -890,5 +954,78 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") qsa(".modal.show").forEach((modal) => hideModal(modal));
 });
 
+let bulkValidated = false;
+qs('#populated-only').addEventListener('change', renderProcessBoard);
+qs('#bulk-upload-form [name="file"]').addEventListener('change', () => {
+  bulkValidated = false;
+  qs('#bulk-submit').textContent = 'Validate File';
+  qs('#bulk-result').textContent = '';
+});
+qs('#bulk-upload-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = qs('#bulk-submit');
+  const result = qs('#bulk-result');
+  button.disabled = true;
+  try {
+    const data = new FormData(event.target);
+    if (!bulkValidated) data.append('preview', 'true');
+    const response = await fetch('/api/use-cases/import', { method: 'POST', body: data });
+    const payload = await response.json();
+    if (!response.ok) {
+      result.textContent = [payload.error, ...(payload.errors || [])].join('\n');
+      bulkValidated = false;
+      button.textContent = 'Validate File';
+      return;
+    }
+    if (payload.preview) {
+      result.textContent = `${payload.count} valid use cases ready to append. No existing records will be replaced.`;
+      bulkValidated = true;
+      button.textContent = `Import ${payload.count} Use Cases`;
+    } else {
+      result.textContent = `${payload.imported} use cases imported.`;
+      bulkValidated = false;
+      event.target.reset();
+      button.textContent = 'Validate File';
+      await refresh();
+    }
+  } catch (err) { result.textContent = err.message; }
+  finally { button.disabled = false; }
+});
+
+function setColumnWidth(key, width) {
+  const col = qs(`col[data-column="${key}"]`);
+  const value = Math.min(900, Math.max(90, width));
+  col.style.width = `${value}px`;
+  columnWidths[key] = value;
+  qs('#usecase-table').style.width = `${REGISTRY_COLUMNS.reduce((total, [field, , initial]) => total + (Number(columnWidths[field]) || initial), 0)}px`;
+}
+document.addEventListener('pointerdown', (event) => {
+  const handle = event.target.closest('[data-resize-column]');
+  if (!handle) return;
+  event.preventDefault();
+  const key = handle.dataset.resizeColumn;
+  const startX = event.clientX;
+  const startWidth = qs(`col[data-column="${key}"]`).getBoundingClientRect().width;
+  handle.setPointerCapture(event.pointerId);
+  const move = (next) => setColumnWidth(key, startWidth + next.clientX - startX);
+  const end = () => {
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', end);
+    handle.removeEventListener('pointercancel', end);
+    localStorage.setItem('fast-column-widths', JSON.stringify(columnWidths));
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+});
+document.addEventListener('keydown', (event) => {
+  const handle = event.target.closest('[data-resize-column]');
+  if (!handle || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  event.preventDefault();
+  const key = handle.dataset.resizeColumn;
+  setColumnWidth(key, qs(`col[data-column="${key}"]`).getBoundingClientRect().width + (event.key === 'ArrowLeft' ? -20 : 20));
+  localStorage.setItem('fast-column-widths', JSON.stringify(columnWidths));
+});
+initRegistry();
 setActiveSection(qs(".app-section.active")?.id || "dashboard");
 refresh();
